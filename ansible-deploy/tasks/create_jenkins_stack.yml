@@ -1,0 +1,22 @@
+---
+- name: create/update Jenkins stack
+  cloudformation:
+    stack_name: Jenkins-Stack
+    state: present
+    template: templates/cloudformation/jenkins-stack.json
+    template_format: json
+    template_parameters:
+      EcsOptimizedAmiId: "{{ ecs_optimized_ami }}"
+      InstanceTypeParameter: "{{ jenkins_instance_type }}"
+      KeyName: "{{ ec2_keypair }}"
+      Region: "{{ region }}"
+      SubnetId: "{{ subnet_id }}"
+      VpcId: "{{ vpc_id }}"
+    tags:
+      Name: "Jenkins Stack"
+      Environment: dev
+  when: jenkins is defined
+  register: cf_stack
+
+- debug: msg={{ cf_stack }}
+  when: debug is defined

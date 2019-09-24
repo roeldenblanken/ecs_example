@@ -1,0 +1,14 @@
+version: '3'
+
+services:
+  hello-world:
+    build:
+        context: ../../../
+        dockerfile: docker/dev/hello-world/Dockerfile  
+        args:
+            http_proxy: "${http_proxy}"
+    environment:
+            COLOR: "${COLOR}"
+    ports:
+      - "80:80"
+    image: docker.io/blankia/hello-world:latest

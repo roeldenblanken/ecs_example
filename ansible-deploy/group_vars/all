@@ -1,0 +1,10 @@
+---
+vpc_id: vpc-85071ae1
+subnet_id: subnet-d776508f
+ec2_keypair: Work
+ecs_optimized_ami: ami-02bf9e90a6e30dc74
+jenkins_instance_type: t2.large
+region: eu-west-1
+app_instance_count: 2
+
+

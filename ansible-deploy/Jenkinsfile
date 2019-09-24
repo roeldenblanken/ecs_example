@@ -1,0 +1,16 @@
+node {
+  checkout scm
+
+  environment {
+		AWS_ACCESS_KEY_ID     = credentials('jenkins-aws-secret-key-id')
+		AWS_SECRET_ACCESS_KEY = credentials('jenkins-aws-secret-access-key')
+		VAULT_PASSWORD 		  = ${VAULT_PASSWORD}
+  }
+  
+  stage 'Deploy application release'
+  writeFile file: 'extras.json', text: "{'image_tag':'${IMAGE_TAG}', ${TASKS}, 'debug': '${debug}',COLOR: ${COLOR}}"
+  withEnv(["VAULT_PASSWORD=${VAULT_PASSWORD}"]) {
+	sh 'echo \${VAULT_PASSWORD} > ansible-deploy/vault.py'
+    sh 'ansible-playbook ansible-deploy/site.yml --vault-password-file ansible-deploy/vault.py -e "@extras.json"'
+  }  
+}

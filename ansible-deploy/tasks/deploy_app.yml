@@ -1,0 +1,45 @@
+---
+- name: set task definition facts
+  set_fact:
+    example_app_task_def_arn: 
+      "{{ cf_stack.stack_outputs.ExampleAppTaskDefinition | regex_replace('^(.*):[\\d]*$','\\1') }}"
+
+- name: update task definitions
+  aws_ecs_taskdefinition:
+    state: update
+    arn: "{{ item }}"
+    containers:
+      - name: hello-world
+        image: "{{ image_tag }}"
+        environment:
+          - name: "COLOR"
+            value: "{{ COLOR }}"
+  with_items:
+    - "{{ example_app_task_def_arn }}"
+  when: image_tag is defined
+
+- name: reconfigure service
+  aws_ecs_service:
+    state: update
+    name: "{{ cf_stack.stack_outputs.ExampleAppService }}"
+    cluster: "{{ cf_stack.stack_outputs.EcsCluster }}"
+    task_definition: "{{ example_app_task_def_arn }}" 
+    desired_count: "{{ app_instance_count | default(1) }}"
+    deployment_config: 
+      minimumHealthyPercent: 50
+      maximumPercent: 200
+  register: configure_ecs_service
+  when: stack_config is defined
+- debug: msg={{ configure_ecs_service }}
+  when: configure_ecs_service is defined and debug is defined
+  
+- name: deploy service update
+  aws_ecs_service:
+    state: update
+    name: "{{ cf_stack.stack_outputs.ExampleAppService }}"
+    cluster: "{{ cf_stack.stack_outputs.EcsCluster }}"
+    task_definition: "{{ example_app_task_def_arn }}" 
+  register: update_ecs_service
+  when: image_tag is defined
+- debug: msg={{ update_ecs_service }}
+  when: update_ecs_service is defined and debug is defined

@@ -1,0 +1,13 @@
+---
+- name: Sample Deployment Playbook
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  vars_files:
+    - secrets.yml
+  environment:
+    AWS_DEFAULT_REGION: "{{ lookup('env', 'AWS_DEFAULT_REGION') | default('eu-west-1', true) }}"
+  tasks:
+    - include: tasks/create_jenkins_stack.yml
+    - include: tasks/create_app_stack.yml
+    - include: tasks/deploy_app.yml

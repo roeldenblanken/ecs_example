@@ -1,0 +1,221 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Jenkins Stack",
+  "Parameters" : {
+	  "InstanceTypeParameter" : {
+		"Type" : "String",
+		"Default" : "t2.large",
+		"Description" : "Enter t2.micro, t2.small, or t2.large. Default is t2.micro."
+	  },
+	  "EcsOptimizedAmiId" : {
+		"Type" : "String",
+		"Default" : "ami-02bf9e90a6e30dc74",
+		"Description" : "Enter the latest ECS optimized AMI for the given region: https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs-optimized_AMI.html."
+	  },
+	  "VpcId" : {
+		"Type" : "String",
+		"Default" : "vpc-85071ae1",
+		"Description" : "Enter the VpcId."
+	  },
+	  "SubnetId" : {
+		"Type" : "String",
+		"Default" : "subnet-d776508f",
+		"Description" : "Enter the subnet."
+	  },
+	  "KeyName" : {
+		"Type" : "String",
+		"Default" : "Work",
+		"Description" : "Enter the keyname."
+	  },
+	  "Region" : {
+		"Type" : "String",
+		"Default" : "eu-west-1",
+		"Description" : "Enter the region name."
+	  }
+  },
+  "Resources": {
+    "EC2Instance": {
+      "Type": "AWS::EC2::Instance",
+      "Properties": {
+        "ImageId":  { "Ref" : "EcsOptimizedAmiId" },
+        "InstanceType":  { "Ref" : "InstanceTypeParameter" },
+        "SubnetId": { "Ref" : "SubnetId" },
+        "KeyName": { "Ref": "KeyName" },
+        "SecurityGroupIds": [ { "Ref": "EC2InstanceSecurityGroup" } ],
+        "IamInstanceProfile": { "Ref": "EC2InstanceProfile" },
+        "UserData" : { 
+          "Fn::Base64" : { "Fn::Join" : ["", [
+            "#!/bin/bash\n",
+            "echo ECS_CLUSTER=", { "Ref" : "EcsCluster" }, " >> /etc/ecs/ecs.config\n",
+            "groupadd -g 996 jenkins\n",
+            "useradd -u 996 -g jenkins jenkins\n",
+            "mkdir -p /ecs/jenkins_home\n",
+            "chown -R jenkins:jenkins /ecs/jenkins_home\n"
+          ] ] } 
+        },
+        "Tags": [ { "Key": "Name", "Value": { "Fn::Join": ["", [ { "Ref": "AWS::StackName" }, "-instance" ] ] } } ]
+      }
+    },
+	"JenkinsLogGroup": {
+  		"Type": "AWS::Logs::LogGroup",
+		"Properties": {
+			"LogGroupName" : "/aws/ecs/jenkins/",
+			"RetentionInDays": 30
+		}
+	},
+    "EC2InstanceSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "Jenkins Ingress Access",
+        "VpcId": { "Ref" : "VpcId" },
+        "SecurityGroupIngress": [
+          { 
+            "IpProtocol" : "tcp", 
+            "FromPort" : "8080", 
+            "ToPort" : "8080",
+            "SourceSecurityGroupId" : { "Ref" : "ElbSecurityGroup" } 
+          },
+          { 
+            "IpProtocol" : "tcp", 
+            "FromPort" : "22", 
+            "ToPort" : "22",
+            "CidrIp" : "0.0.0.0/0"
+          }
+        ],
+        "Tags": [ { "Key": "Name", "Value": { "Fn::Join": ["", [ { "Ref": "AWS::StackName" }, "-instance-sg" ] ] } } ]
+      }
+    },
+    "EC2InstanceProfile": {
+      "Type": "AWS::IAM::InstanceProfile",
+      "Properties": {
+        "Path": "/",
+        "Roles": [ { "Ref": "EC2InstanceRole" } ]
+      }
+    },
+    "EC2InstanceRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": { "Service": [ "ec2.amazonaws.com" ] },
+              "Action": [ "sts:AssumeRole" ]
+            }
+          ]
+        },
+        "Path": "/",
+        "ManagedPolicyArns": [ 
+          "arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role",
+          "arn:aws:iam::aws:policy/AdministratorAccess"
+        ]
+      }
+    },
+    "ElbSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "Jenkins ELB Ingress Access",
+        "VpcId": "vpc-85071ae1",
+        "SecurityGroupIngress": [
+          { 
+            "IpProtocol" : "tcp", 
+            "FromPort" : "80", 
+            "ToPort" : "80",
+            "CidrIp": "0.0.0.0/0"
+          }
+        ],
+        "Tags": [ { "Key": "Name", "Value": { "Fn::Join": ["", [ { "Ref": "AWS::StackName" }, "-elb-sg" ] ] } } ]
+      }
+    },
+    "ElasticLoadBalancer": {
+      "Type" : "AWS::ElasticLoadBalancing::LoadBalancer",
+      "Properties": {
+        "CrossZone": "false",
+        "SecurityGroups" : [ { "Ref": "ElbSecurityGroup" } ],
+        "Listeners" : [ 
+          {
+            "LoadBalancerPort" : "80",
+            "InstancePort" : "8080",
+            "Protocol" : "http"
+          }
+        ],
+        "Instances": [ { "Ref": "EC2Instance" } ],
+        "Subnets" : [ {"Ref" : "SubnetId"} ]
+      }
+    },
+    "EcsCluster": {
+      "Type": "AWS::ECS::Cluster"
+    },
+    "EcsTaskDefinition": {
+      "Type" : "AWS::ECS::TaskDefinition",
+      "Properties" : {
+        "ContainerDefinitions" : [ 
+          {
+            "Name": "jenkins",
+            "Image": "blankia/jenkins:latest",
+            "Memory": 2024,
+			"Cpu": 1024,
+            "PortMappings": [ { "ContainerPort": 8080, "HostPort": 8080 } ],
+            "MountPoints": [
+              {
+                "ContainerPath": "/var/jenkins_home",
+                "SourceVolume": "jenkins_home"
+              },
+              {
+                "ContainerPath": "/var/run/docker.sock",
+                "SourceVolume": "docker"
+              }
+            ],
+            "LogConfiguration": {
+                "LogDriver": "awslogs",
+                "Options": {
+                    "awslogs-group": { "Ref": "JenkinsLogGroup" },
+                    "awslogs-region": { "Ref": "Region" },
+                    "awslogs-stream-prefix": "ecs"
+                }
+            }
+          }
+        ],
+        "Volumes" : [ 
+          { 
+            "Name": "jenkins_home",
+            "Host": { "SourcePath": "/var/tmp" }
+          },
+          {
+            "Name": "docker",
+            "Host": { "SourcePath": "/var/run/docker.sock" }
+          }
+        ]
+      }
+    },
+    "EcsService": {
+      "Type": "AWS::ECS::Service",
+      "Properties": {
+        "Cluster": { "Ref": "EcsCluster" },
+        "DesiredCount": 1,
+        "TaskDefinition": { "Ref": "EcsTaskDefinition" }
+      }
+    }
+  },
+  "Outputs": {
+    "ElbDomainName": {
+      "Description": "Public DNS name of Elastic Load Balancer",
+      "Value": {
+        "Fn::GetAtt": [
+          "ElasticLoadBalancer",
+          "DNSName"
+        ]
+      }
+    },
+    "EC2InstanceDomainName": {
+      "Description": "Public DNS name of EC2 Instance",
+      "Value": {
+        "Fn::GetAtt": [
+          "EC2Instance",
+          "PublicDnsName"
+        ]
+      }
+    }
+  }
+}

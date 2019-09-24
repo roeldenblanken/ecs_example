@@ -1,0 +1,23 @@
+---
+- name: create/update app stack
+  cloudformation:
+    stack_name: example-app-stack
+    state: present
+    template: templates/cloudformation/app-stack.yml
+    template_format: yaml
+    template_parameters:
+      EcsOptimizedAmiId: "{{ ecs_optimized_ami }}"
+      InstanceTypeParameter: "{{ jenkins_instance_type }}"
+      KeyName: "{{ ec2_keypair }}"
+      Region: "{{ region }}"
+      SubnetId: "{{ subnet_id }}"
+      VpcId: "{{ vpc_id }}"
+      InstanceCount: "{{ app_instance_count | default(1) }}"
+    tags:
+      name: example-app-stack
+      Environment: dev
+  register: cf_stack
+  when: app is defined
+  
+- debug: msg={{ cf_stack }}
+  when: debug is defined

@@ -1,0 +1,185 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Example ecs app-stack"
+
+# Stack Parameters
+Parameters:
+  EcsOptimizedAmiId: 
+    Type: "String"
+    Default: "ami-02bf9e90a6e30dc74"
+    Description: "The ecs optimized ami"
+  InstanceTypeParameter: 
+    Type: "String"
+    Default: "t2.large"
+    Description: "The instance type. For example t2.large"
+  VpcId: 
+    Type: "AWS::EC2::VPC::Id"
+    Description: "The target VPC Id"
+  SubnetId:
+    Type: "AWS::EC2::Subnet::Id"
+    Description: "The target Subnet Id in Availability Zone a"
+  KeyName:
+    Type: "String"
+    Description: "The key pair that is allowed SSH access"
+  InstanceCount:
+    Type: "Number"
+    Description: "The desired number of application instances"
+  Region: 
+    Type: "String"
+    Default: "eu-west-1"
+    Description: "The region"
+    
+# Stack Resources
+Resources:
+  AutoScalingGroup:
+    Type: "AWS::AutoScaling::AutoScalingGroup"
+    Properties:
+      VPCZoneIdentifier: [ { "Ref": "SubnetId" } ]
+      LaunchConfigurationName: { "Ref": "AutoScalingLaunchConfiguration" }
+      MinSize: 0
+      MaxSize: 2
+      DesiredCapacity: { "Ref": "InstanceCount" }
+      Tags:
+        - Key: "Name"
+          Value: { "Fn::Join": ["", [ { "Ref": "AWS::StackName" }, "-instance" ] ] }
+          PropagateAtLaunch: "true"
+  AutoScalingLaunchConfiguration:
+    Type: "AWS::AutoScaling::LaunchConfiguration"
+    Properties:
+      ImageId: { "Ref": "EcsOptimizedAmiId" }
+      InstanceType: { "Ref": "InstanceTypeParameter" }
+      KeyName: { "Ref": "KeyName" }
+      IamInstanceProfile: { "Ref": "EC2InstanceProfile" }
+      SecurityGroups:
+        - { "Ref": "EC2InstanceSecurityGroup" }
+      UserData: {
+        "Fn::Base64": { "Fn::Join": ["", [
+          "#!/bin/bash\n",
+          "echo ECS_CLUSTER=", { "Ref" : "EcsCluster" }, " >> /etc/ecs/ecs.config\n"
+        ] ] }
+      }
+  EC2InstanceSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties: 
+      GroupDescription: "example-app-sg"
+      VpcId: { "Ref": "VpcId" }
+      SecurityGroupIngress: 
+        - IpProtocol: "tcp"
+          FromPort: "80"
+          ToPort: "80"
+          SourceSecurityGroupId: { "Ref": "ElbSecurityGroup" }
+        - IpProtocol: "tcp"
+          FromPort: "22"
+          ToPort: "22"
+          CidrIp: "0.0.0.0/0"
+      Tags: 
+        - Key: "Name"
+          Value: { "Fn::Join": ["", [ { "Ref": "AWS::StackName" }, "-instance-sg" ] ] }
+  EC2InstanceProfile:
+    Type: "AWS::IAM::InstanceProfile"
+    Properties: 
+      Path: "/"
+      Roles: [ { "Ref": "EC2InstanceRole" } ]
+  EC2InstanceRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument: {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Principal": { "Service": [ "ec2.amazonaws.com" ] },
+            "Action": [ "sts:AssumeRole" ]
+          }
+        ]
+      }
+      Path: "/"
+      ManagedPolicyArns: 
+        - "arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role"     
+  ElasticLoadBalancer:
+    Type: "AWS::ElasticLoadBalancing::LoadBalancer"
+    Properties:
+      CrossZone: "false"
+      SecurityGroups: [ { "Ref": "ElbSecurityGroup" } ]
+      Listeners:
+        - LoadBalancerPort: "80"
+          InstancePort: "80"
+          Protocol: "http"
+      HealthCheck: 
+        Target: "HTTP:80/"
+        HealthyThreshold: "2"
+        UnhealthyThreshold: "10"
+        Interval: "30"
+        Timeout: "5"
+      Subnets: [ { "Ref": "SubnetId" } ]
+      Tags: 
+        - Key: "Name"
+          Value: { "Fn::Join": ["", [ { "Ref": "AWS::StackName" }, "-elb" ] ] }
+  ElbSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: "Example app ELB Security Group"
+      VpcId: { "Ref": "VpcId" }
+      SecurityGroupIngress:
+        - IpProtocol: "tcp"
+          FromPort: "80"
+          ToPort: "80"
+          CidrIp: "0.0.0.0/0"
+      Tags: 
+        - Key: "Name"
+          Value: { "Fn::Join": ["", [ { "Ref": "AWS::StackName" }, "-elb-sg" ] ] }
+  EcsCluster:
+    Type: "AWS::ECS::Cluster"
+  ExampleAppTaskDefinition: 
+    Type: "AWS::ECS::TaskDefinition"
+    Properties:
+      ContainerDefinitions:
+        - Name: hello-world
+          Image: blankia/hello-world
+          Memory: 500
+          PortMappings:
+            - ContainerPort: "80"
+              HostPort: "80"
+  ExampleAppService:
+    Type: "AWS::ECS::Service"
+    Properties:
+      TaskDefinition: { "Ref": "ExampleAppTaskDefinition" }
+      Cluster: { "Ref": "EcsCluster" }
+      LoadBalancers:
+        - ContainerName: "hello-world"
+          ContainerPort: "80"
+          LoadBalancerName: { "Ref": "ElasticLoadBalancer" }
+      Role: { "Ref": "EcsServiceRole" }
+      DesiredCount: 2
+  EcsServiceRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument: {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Principal": {
+              "Service": [ "ecs.amazonaws.com" ]
+            },
+            "Action": [ "sts:AssumeRole" ]
+          }
+        ]
+      }
+      Path: "/"
+      ManagedPolicyArns: 
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceRole
+
+# Stack Outputs
+Outputs:
+  ElbDomainName: 
+    Description: "Public DNS name of Elastic Load Balancer"
+    Value: { "Fn::GetAtt": [ "ElasticLoadBalancer", "DNSName" ] }
+  EcsCluster:
+    Description: "Amazon Resource Name (ARN) of exampleApp Ecs Cluster"
+    Value: { "Ref": "EcsCluster" }
+  ExampleAppTaskDefinition:
+    Description: "Amazon Resource Name (ARN) of exampleApp Task Definition"
+    Value: { "Ref": "ExampleAppTaskDefinition" }
+  ExampleAppService: 
+    Description: "Amazon Resource Name (ARN) of exampleApp Service"
+    Value: { "Ref": "ExampleAppService" }
